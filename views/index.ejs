@@ -119,6 +119,65 @@
 
         const logoutButton = $('#close-session');
 
+        // Guardar la hora de la última actividad en localStorage
+        window.addEventListener('beforeunload', () => {
+            localStorage.setItem('lastActivityTime', new Date().getTime());
+        });
+
+        // Verificar al cargar la página si la última actividad fue hace más de 2 minutos
+        window.addEventListener('load', () => {
+            const storedTime = localStorage.getItem('lastActivityTime');
+            const currentTime = new Date().getTime();
+
+            if (storedTime && (currentTime - storedTime > 2 * 60 * 1000)) {
+                // Si han pasado más de 2 minutos, cerrar la sesión
+                fetch('/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }).then(() => {
+                    alert('La sesión ha expirado por inactividad.');
+                    window.location.href = '/';
+                }).catch(err => {
+                    console.error(err);
+                });
+            }
+        });
+
+        let inactivityTime = function () {
+            let time;
+            const logoutAfterInactivity = () => {
+                alert("La sesión ha expirado por inactividad.");
+                fetch('/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }).then(() => {
+                    window.location.href = '/';
+                }).catch(err => {
+                    console.error(err);
+                });
+            };
+
+            const resetTimer = () => {
+                clearTimeout(time);
+                // time = setTimeout(logoutAfterInactivity, 600000);  // 10 minutos de inactividad
+                time = setTimeout(logoutAfterInactivity, 60000);  // 1 minuto de inactividad
+            };
+
+            // Eventos que resetearán el temporizador de inactividad
+            window.onload = resetTimer;
+            document.onmousemove = resetTimer;
+            document.onkeypress = resetTimer;
+            document.onclick = resetTimer;
+            document.onscroll = resetTimer;
+        };
+
+        window.onload = inactivityTime;
+
+
         loginForm?.addEventListener('submit', e => {
             e.preventDefault();
             const username = $('#login-username').value;

@@ -1,6 +1,6 @@
 
 import express from 'express'
-import { PORT, SECRET_JWT_KEY } from './config.js'
+import { PORT, REFRESH_JWT_KEY, SECRET_JWT_KEY } from './config.js'
 import { UserRepository } from './user-repository.js'
 import jwt from 'jsonwebtoken'
 import cookieParser from 'cookie-parser'
@@ -13,22 +13,58 @@ app.use(express.json())
 app.use(cookieParser())
 
 // Middleware para verificar el token de acceso y almacenar la sesión del usuario
+// app.use((req, res, next) => {
+//     // Recuperamos el token de acceso de las cookies
+//     const token = req.cookies.access_token
+//     // Inicializamos la sesión del usuario en null
+//     req.session = { user: null }
+//     try {
+//         // Verificamos y decodificamos el token utilizando la clave secreta
+//         const data = jwt.verify(token, SECRET_JWT_KEY)
+//         // Si el token es válido, almacenamos los datos del usuario en la sesión
+//         req.session.user = data
+//     } catch (error) {
+//         // Si el token no es válido o está ausente, simplemente seguimos sin usuario en la sesión
+//     }
+//     // Continuar con la siguiente ruta o middleware
+//     next()
+// })
+
+
 app.use((req, res, next) => {
-    // Recuperamos el token de acceso de las cookies
-    const token = req.cookies.access_token
-    // Inicializamos la sesión del usuario en null
+    let token = req.cookies.access_token
     req.session = { user: null }
+
     try {
-        // Verificamos y decodificamos el token utilizando la clave secreta
         const data = jwt.verify(token, SECRET_JWT_KEY)
-        // Si el token es válido, almacenamos los datos del usuario en la sesión
         req.session.user = data
     } catch (error) {
-        // Si el token no es válido o está ausente, simplemente seguimos sin usuario en la sesión
+        const refreshToken = req.cookies.refresh_token
+        if (refreshToken) {
+            try {
+                const data = jwt.verify(refreshToken, REFRESH_JWT_KEY)
+                const newToken = jwt.sign(
+                    { id: data.id, username: data.username },
+                    SECRET_JWT_KEY,
+                    { expiresIn: '1h' }
+                )
+                res.cookie('access_token', newToken, {
+                    httpOnly: true,
+                    secure: process.env.NODE_ENV === 'production',
+                    sameSite: 'strict',
+                    maxAge: 1000 * 60 * 60
+                })
+                req.session.user = data
+            } catch (refreshError) {
+                // Handle invalid refresh token, clear cookies if needed
+                res.clearCookie('access_token')
+                res.clearCookie('refresh_token')
+            }
+        }
     }
-    // Continuar con la siguiente ruta o middleware
     next()
 })
+
 
 // Configuración del motor de plantillas EJS
 app.set('view engine', 'ejs')
@@ -52,8 +88,15 @@ app.post('/login', async (req, res) => {
         const token = jwt.sign(
             { id: user._id, username: user.username }, // Datos que queremos almacenar en el token
             SECRET_JWT_KEY, // Clave secreta para firmar el token
-            { expiresIn: '1h' } // El token expira en 1 hora
+            { expiresIn: '1m' } // El token expira en 1 hora
         )
+
+        const refreshToken = jwt.sign(
+            { id: user._id, username: user.username },
+            REFRESH_JWT_KEY,
+            { expiresIn: '7d' } // El token expira en 7 dias
+        )
+
 
         // Enviamos la cookie con el token de acceso y respondemos con los datos del usuario
         res
@@ -61,7 +104,15 @@ app.post('/login', async (req, res) => {
                 httpOnly: true, // La cookie solo se puede acceder desde el servidor, no desde el navegador
                 secure: process.env.NODE_ENV === 'production', // La cookie solo está disponible en HTTPS si estamos en producción
                 sameSite: 'strict', // La cookie solo se envía en solicitudes del mismo dominio
-                maxAge: 1000 * 60 * 60 // La cookie expira en 1 hora
+                // maxAge: 1000 * 60 * 60 // La cookie expira en 1 hora
+                maxAge: 1000 * 60 // La cookie expira en 1 minuto
+
+            })
+            .cookie('refresh_token', refreshToken, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'strict',
+                maxAge: 1000 * 60 * 60 * 24 * 7
             })
             .send({ user, token }) // Respondemos con los datos del usuario y el token
     } catch (error) {
@@ -89,6 +140,7 @@ app.post('/logout', (req, res) => {
     // Limpiamos la cookie del token de acceso para cerrar la sesión
     res
         .clearCookie('access_token') // Eliminamos la cookie de la respuesta
+        .clearCookie('refresh_token') // Eliminamos la cookie de la respuesta
         .json({ message: 'Sesión cerrada' }) // Respondemos con un mensaje de confirmación
 })
 
